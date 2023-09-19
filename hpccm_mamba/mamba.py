@@ -1,3 +1,6 @@
+# pylint: disable=invalid-name, too-few-public-methods
+# pylint: disable=too-many-instance-attributes
+
 """ mamba building block """
 
 from __future__ import absolute_import
@@ -25,10 +28,45 @@ from hpccm.primitives.environment import environment
 class mamba(bb_base, hpccm.templates.rm, hpccm.templates.wget, hpccm.templates.tar):
     """The `mamba` building block installs Mamba.
 
+    # Parameters
 
+    channels:
+
+    channels: List of additional Conda channels to enable.  The
+    default is an empty list.
+
+    environment: Path to the Conda environment file to clone.  The
+    default value is empty.
+
+    environment_name: Name of the environment to install. This correspond
+    to the name in the environment.yml file.
+
+    ospackages: List of OS packages to install prior to installing
+    Conda.  The default values are `ca-certificates` and `wget`.
+
+    packages: List of Conda packages to install.  The default is an
+    empty list.
+
+    prefix: The top level install location.  The default value is
+    `/opt/conda`.
+
+    # Examples
+
+    ```python
+    mamba(packages=['numpy'])
+    ```
+
+    ```python
+    mamba(channels=['conda-forge', 'nvidia'], prefix='/opt/conda')
+    ```
+
+    ```python
+    mamba(environment='environment.yml')
+    ```
     """
 
     def __init__(self, **kwargs):
+        """Initialize building block"""
 
         super(mamba, self).__init__(**kwargs)
 
@@ -41,6 +79,7 @@ class mamba(bb_base, hpccm.templates.rm, hpccm.templates.wget, hpccm.templates.t
         self.__packages = kwargs.get('packages', list())
         self.__environment_name = kwargs.get("environment_name", '')
         self.__prefix = kwargs.get('prefix', '/opt/conda')
+        self.__advanced_cleanup = kwargs.get('advanced_cleanup', False)
 
         self.__commands = []  # Filled in by __setup()
         self.__wd = kwargs.get('wd', hpccm.config.g_wd)  # working directory
@@ -80,6 +119,7 @@ class mamba(bb_base, hpccm.templates.rm, hpccm.templates.wget, hpccm.templates.t
 
     def __setup(self):
         """Construct the series of shell commands, i.e., fill in self.__commands"""
+
         # Check version
         micromamba_distribution = "linux-{0}/latest".format(self.__arch_pkg)
         url = "{0}/{1}".format(self.__base_url, micromamba_distribution)
@@ -113,15 +153,6 @@ class mamba(bb_base, hpccm.templates.rm, hpccm.templates.wget, hpccm.templates.t
         self.__commands.append(
             "grep -v '[ -z \"\\$PS1\" ] && return' /root/.bashrc  > {0}/.bashrc".format(self.__prefix)
         )
-        # self.__commands.append(
-        #     "ln -s {0} /etc/profile.d/micromamba".format(micromamba)
-        # )
-
-        # Activate
-        # if self.__channels or self.__environment or self.__packages:
-        #     self.__commands.append(
-        #         "echo \"micromamba activate\" >> /root/.bashrc"
-        #     )
 
         # Enable channels
         _mamba_config = "/root/.mambarc"
@@ -148,9 +179,6 @@ class mamba(bb_base, hpccm.templates.rm, hpccm.templates.wget, hpccm.templates.t
                     posixpath.join(self.__wd, posixpath.basename(self.__environment)),
                 )
             )
-            # self.__commands.append(
-            #     "grep '^name:' environment.yml | awk '{print $2}' | xargs conda activate"
-            # )
             self.__commands.append(
                 self.cleanup_step(
                     items=[posixpath.join(self.__wd, posixpath.basename(self.__environment))]
@@ -168,9 +196,9 @@ class mamba(bb_base, hpccm.templates.rm, hpccm.templates.wget, hpccm.templates.t
                     ' '.join(sorted(self.__packages))
                 )
             )
-            self.__commands.append(
-                "{0} activate {1}".format(micromamba, self.__environment_name)
-            )
+            # self.__commands.append(
+            #     "{0} activate {1}".format(micromamba, self.__environment_name)
+            # )
             # self.__commands.append('micromamba install -y {}'.format(
             #     ' '.join(sorted(self.__packages))))
 
@@ -180,25 +208,26 @@ class mamba(bb_base, hpccm.templates.rm, hpccm.templates.wget, hpccm.templates.t
         )
 
         # Advanced cleanup of packages
-        conda_env_path = posixpath.join(self.__prefix, "envs", self.__environment_name)
-        self.__commands.append(
-            self.cleanup_step(
-                items=[
-                    posixpath.join(conda_env_path, "bin", "sqlite3"),
-                    posixpath.join(conda_env_path, "bin", "openssl"),
-                    posixpath.join(conda_env_path, "share", "terminfo"),
-                ]
+        if self.__advanced_cleanup:
+            conda_env_path = posixpath.join(self.__prefix, "envs", self.__environment_name)
+            self.__commands.append(
+                self.cleanup_step(
+                    items=[
+                        posixpath.join(conda_env_path, "bin", "sqlite3"),
+                        posixpath.join(conda_env_path, "bin", "openssl"),
+                        posixpath.join(conda_env_path, "share", "terminfo"),
+                    ]
+                )
             )
-        )
-        _find_string = "find {0}/lib/python*/site-packages -type d"
-        _exec_rm_string = " -exec rm -rf '{}' '+'"
-        self.__commands.extend([
-            _find_string.format(conda_env_path) + " -name \"pip\"" + _exec_rm_string,
-            _find_string.format(conda_env_path) + " -name \"tests\"" + _exec_rm_string,
-            _find_string.format(conda_env_path) + " -name \"*.pyx\"" + _exec_rm_string,
-            "find {0}/lib/python*/ -type d".format(conda_env_path) + " -name \"ensurepip\"" + _exec_rm_string,
-            "find {0}/lib/python*/ -type d".format(conda_env_path) + " -name \"idlelib\"" + _exec_rm_string,
-        ])
+            _find_string = "find {0}/lib/python*/site-packages -type d"
+            _exec_rm_string = " -exec rm -rf '{}' '+'"
+            self.__commands.extend([
+                _find_string.format(conda_env_path) + " -name \"pip\"" + _exec_rm_string,
+                _find_string.format(conda_env_path) + " -name \"tests\"" + _exec_rm_string,
+                _find_string.format(conda_env_path) + " -name \"*.pyx\"" + _exec_rm_string,
+                "find {0}/lib/python*/ -type d".format(conda_env_path) + " -name \"ensurepip\"" + _exec_rm_string,
+                "find {0}/lib/python*/ -type d".format(conda_env_path) + " -name \"idlelib\"" + _exec_rm_string,
+            ])
 
         # Cleanup micromamba download file
         self.__commands.append(
